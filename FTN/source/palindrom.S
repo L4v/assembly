@@ -30,6 +30,8 @@ input: #UNOS STRINGA
 	movl $string, %eax
 	movl $0, %edx #KRUCIJALNO
 
+#*** UKLANJANJE SPACE ***
+
 to_end: #IDI DO KRAJA
 	cmpb $10, (%eax) 
 	je space
@@ -39,7 +41,7 @@ to_end: #IDI DO KRAJA
 	
 space: #PROVERA SPACE
 	cmpl $0, %edx
-	je end
+	je lower_check
 	cmpb $' ', -1(%eax) #jov an /enter
 	je rem_space
 	decl %eax
@@ -64,9 +66,70 @@ is_enter: #POMERI ENTER ZA JEDAN
 	movb $0, (%eax)
 	movb $10, -1(%eax)
 	movl $string, %eax
+	#movl %edx, str1
 	movl $0, %edx
 	jmp to_end
 	
+#****************
+
+#*** SMANJENJE SLOVA ***
+lower_check: #PROVERA VELICINE
+	cmpb $10, (%eax)
+	je pal_prep
+	cmpb $'a', (%eax)
+	jl to_lower
+	incl %eax
+	jmp lower_check
+
+to_lower:
+	addl $32, (%eax)
+	incl %eax
+	jmp lower_check
+	
+#****************
+
+#*** PROVERA PALINDROMA ***
+pal_prep:
+	movl $string, %eax
+	movl $string, %ebx
+	jmp pal_end
+	
+pal_end:
+	cmpb $10, 1(%ebx)
+	je palindrome
+	incl %ebx
+	jmp pal_end
+	
+palindrome:
+	cmpl %ebx, %eax
+	jg is_pal
+	movb (%eax), %cl
+	cmpb (%ebx), %cl
+	jne not_pal
+	
+is_pal:
+	movl $4, %eax
+	movl $1, %ebx
+	leal jestep, %ecx
+	movl $jeste_len, %edx
+	int $0x80
+	jmp end
+	
+not_pal:
+	movl $4, %eax
+	movl $1, %ebx
+	leal nijep, %ecx
+	movl $nije_len, %edx
+	int $0x80
+	jmp end
+#****************
+
+out: #ISPIS
+	movl $4, %eax
+	movl $1, %ebx
+	leal string, %ecx
+	movl str1, %edx
+	int $0x80
 
 end: #KRAJ
 	movl $1, %eax
