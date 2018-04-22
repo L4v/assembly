@@ -32,3 +32,5 @@ int main()
         printf("Došlo je do greške!\n");
     return g;
 }
+
+
