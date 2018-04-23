@@ -25,7 +25,7 @@ int main()
 	for(i=0;i<n;i++){
 		//printf(" %04x \n", niz[i]);
 		// LICNA IZMENA ZA PRINTOVANJE BINARNIH BROJEVA
-		printf("m: "BYTE_TO_BINARY_PATTERN" "BYTE_TO_BINARY_PATTERN"\n",
+		printf("%04x | "BYTE_TO_BINARY_PATTERN" "BYTE_TO_BINARY_PATTERN"\n",niz[i],
   BYTE_TO_BINARY(niz[i]>>8), BYTE_TO_BINARY(niz[i]));
 
 	}
@@ -37,7 +37,7 @@ int main()
 	for(i=0;i<n;i++){
 		//printf(" %04x \n", niz[i]);
 		// LICNA IZMENA ZA PRINTOVANJE BINARNIH BROJEVA
-		printf("m: "BYTE_TO_BINARY_PATTERN" "BYTE_TO_BINARY_PATTERN"\n",
+		printf("%04x | "BYTE_TO_BINARY_PATTERN" "BYTE_TO_BINARY_PATTERN"\n",niz[i],
   BYTE_TO_BINARY(niz[i]>>8), BYTE_TO_BINARY(niz[i]));
 
 	}
