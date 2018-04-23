@@ -40,12 +40,16 @@ DodajMnozi:
 		jmp in
 		
 	in:
-		movl %edx, %ebx
+		movl $10, %eax
 		xorl %edx, %edx
-		mull ten
-		addl %ebx, %edx
+		imull 4(%esi), %eax
+		jo err
+		movl %eax, 4(%esi)
+		movl $10, %eax
+		mull (%esi)
 		movl %eax, (%esi)
-		movl %edx, 4(%esi)
+		addl %edx, 4(%esi)
+		jo err
 		decl %edi
 		incl %ecx
 		addl $8, %esi
@@ -57,6 +61,15 @@ DodajMnozi:
 		decl %edi
 		addl $8, %esi
 		jmp check
+	
+	err:
+		movl $-1, %eax
+		popl %ebx
+		popl %edi
+		popl %esi
+		movl %ebp, %esp
+		popl %ebp
+		ret
 	
 end:
 	movl %ecx, %eax
