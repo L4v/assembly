@@ -37,7 +37,7 @@ inter_to_roman:
 		movb rom1(,%ecx,1), %dl
 		movb %dl, (%esi)
 		incl %esi
-		jmp increment
+		jmp number
 	double:
 		subl $2, %edi
 		cmpl $0, %edi
@@ -49,6 +49,7 @@ inter_to_roman:
 		movb rom1(,%ecx,1), %dl
 		movb %dl, (%esi)
 		incl %esi
+		jmp number
 	increment:
 		incl %ecx
 		jmp convert
@@ -58,6 +59,7 @@ err:
 	jmp end
 
 nerr:
+	movb $0, (%esi)
 	movl $0, %eax
 	jmp end
 
