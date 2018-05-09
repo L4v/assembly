@@ -1,3 +1,4 @@
+#AUTOR: JOVAN IVOSEVIC
 # BROJ, STR POKAZIVAC, KOLIKO MESTA, AKO NESTANE MESTA VRATITI 1 INACE 0
 #unsigned int inter_to_oct_str(unsigned int broj, char* str, unsigned int duzina);
 #OCTAL

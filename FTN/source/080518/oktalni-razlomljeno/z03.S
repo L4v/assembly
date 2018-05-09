@@ -1,3 +1,4 @@
+#AUTOR: JOVAN IVOSEVIC
 #unsigned int inter_to_oct_str_float(unsigned int broj, char* str, unsigned int duzina);0.345
 #RAZLOMLJENO
 .section .text
@@ -12,19 +13,18 @@ inter_to_oct_str_float:
 	movl 8(%ebp), %eax
 	movl 12(%ebp), %esi
 	movl 16(%ebp), %edi
-	decl %edi
 	xorl %ebx, %ebx
 	
 	movb $'0', (%esi)
 	incl %esi
 	movb $'.', (%esi)
 	incl %esi
-	cmpl $2, %edi
-	jbe err
-	movl $2, %ebx
+	#cmpl $2, %edi
+	#jbe err
+	subl $3, %edi #\0, 0, .
 	conv:
-		cmpl %edi, %ebx
-		je check
+		cmpl $0, %edi
+		jl err
 		xorl %edx, %edx
 		movl $8, %ecx
 		mull %ecx
@@ -33,9 +33,11 @@ inter_to_oct_str_float:
 		addb $'0', %al
 		movb %al, (%esi)
 		incl %esi
-		incl %ebx
+		decl %edi
 		movl %edx, %eax
 		andl %eax, %eax
+		jz check
+		andl %edi, %edi
 		jnz conv
 		
 	check:

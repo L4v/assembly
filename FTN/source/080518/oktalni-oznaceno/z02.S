@@ -1,3 +1,4 @@
+#AUTOR: JOVAN IVOSEVIC
 #unsigned int inter_to_oct_str(int broj, char* str, unsigned int duzina);
 #unsigned int inter_to_oct_str( int broj, char* str, unsigned int duzina);
 #OCTAL
