@@ -11,38 +11,41 @@ inter_to_oct_str_float:
 	
 	movl 8(%ebp), %eax
 	movl 12(%ebp), %esi
-	movl 16(%ebp), %ebx
+	movl 16(%ebp), %edi
+	decl %edi
+	xorl %ebx, %ebx
 	
 	movb $'0', (%esi)
 	incl %esi
 	movb $'.', (%esi)
 	incl %esi
+	cmpl $2, %edi
+	jbe err
+	movl $2, %ebx
 	conv:
+		cmpl %edi, %ebx
+		je check
 		xorl %edx, %edx
 		movl $8, %ecx
 		mull %ecx
 		movl $100000000, %ecx
 		divl %ecx
-		movl %edx, %edi
-		subl %edi, %eax
-		movl %eax, %edx
-		movl %edi, %eax
-		#movl %edi, %eax
-		
-		addb $'0', %dl
-		movb %dl, (%esi)
+		addb $'0', %al
+		movb %al, (%esi)
 		incl %esi
-		decl %ebx
-		andl %ebx, %ebx
+		incl %ebx
+		movl %edx, %eax
+		andl %eax, %eax
 		jnz conv
 		
 	check:
 		movb $0, (%esi)
-		movl 16(%ebp), %ecx
 		xorl %eax, %eax
-		cmpl %ecx, %ebx
-		jbe end
-		incl %eax
+		jmp end
+		
+	err:
+		movl $1, %eax
+		jmp end
 		
 		
 end:
