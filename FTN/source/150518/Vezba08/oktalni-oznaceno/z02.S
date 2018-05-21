@@ -47,7 +47,7 @@ oct_str_to_inter:
 		jo bounds
 		incl %esi
 		xorl %ebx, %ebx
-		jmp conv
+		jmp conv_neg
 		
 	conv:
 		movb (%esi), %bl
@@ -66,7 +66,7 @@ oct_str_to_inter:
 		js bounds
 		incl %esi
 		xorl %ebx, %ebx
-		jmp conv_neg
+		jmp conv
 		
 	check_end:
 		xorl %ecx, %ecx
