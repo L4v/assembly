@@ -117,7 +117,7 @@ void test2() {
 void test3() {
     int i,x=1,dx=1;
     clearscr();
-    printstr("1\t2\t3\t4\t5\t6\t7\t8\t");
+    printstr("1\t2\t3\t4\t5\t6\t7\t8\n");
     while(1) {
         for (i=0; i<x; i++) printchr('*');
         printstr(" \r");

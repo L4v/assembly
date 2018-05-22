@@ -57,6 +57,49 @@ printchr:
 	movl %eax, %esi
 	addl cursorx, %esi
 	prn_check:
+		cmpb $'\t', %bl
+		jne not_tab
+		
+		movl cursorx, %eax
+		xorl %edx, %edx
+		movl $10, %edi
+		divl %edi
+		andl %edx, %edx
+		jz remain_0
+		subl %edx, %edi
+		pushl %edi
+		call movCursor
+		addl $4, %esp
+		jmp write
+		
+		remain_0:
+		movl $10, %edi
+		pushl %edi
+		call movCursor
+		addl $4, %esp
+		jmp prnt_end
+		
+		not_tab:
+		cmpb $'\n', %bl
+		jne not_new
+		
+		movl cursory, %eax
+		cmpb scrheight, %eax
+		ja prnt_end #
+		incl cursory
+		movl $0, cursorx
+		jmp prnt_end
+	
+		not_new:
+		cmpb $'\r', %bl
+		jne write
+		movl $0, cursorx
+		jmp prnt_end
+	
+	
+	
+	###
+		write:
 		movb %bl, screen(%esi)
 		incl cursorx
 		movl scrwidth, %ecx
@@ -68,7 +111,7 @@ printchr:
 			movl scrheight, %ecx
 			movl cursory, %edx
 			cmpl %edx, %ecx
-			je prnt_end
+			je prnt_end # err
 			incl cursory
 			movl $0, cursorx
 			jmp prnt_end
@@ -79,6 +122,37 @@ printchr:
 	movl %ebp, %esp
 	popl %ebp
     ret
+
+#movCursor (int ammount)
+movCursor:
+	pushl %ebp
+	movl %esp, %ebp
+	movl 8(%ebp), %eax
+	mov:
+		cmpl $0, %eax
+		je movCursor_end
+		movl cursorx, %ecx
+		cmpl scrwidth, %eax
+		je go_down
+		incl cursorx
+		decl %eax
+		jmp mov
+		
+		go_down:
+			movl scrheight, %ecx
+				movl cursory, %edx
+				cmpl %edx, %ecx
+				je prnt_end # err
+				incl cursory
+				movl $0, cursorx
+				decl %eax
+				jmp movCursor_end
+	
+	
+	movCursor_end:
+	movl %ebp, %esp
+	popl %ebp
+	ret
 
 #void printstr(char* str);
 printstr:
@@ -96,7 +170,6 @@ printstr:
 		addl $4, %esp
 		incl %esi
 		jmp str_check
-
 
 	prnt_str_end:
 	popl %ebx
