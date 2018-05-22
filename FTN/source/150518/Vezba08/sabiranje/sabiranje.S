@@ -38,8 +38,8 @@ strlen = 30
 str1: .fill strlen, 1, 0
 str2: .fill strlen, 1, 0
 bstr1: .fill 3, 1, 0
-bstr2:. fill 3, 1, 0
-bstr3:. fill 3, 1, 0
+bstr2: .fill 3, 1, 0
+bstr3: .fill 3, 1, 0
 
 baza1: .long 0
 baza2: .long 0
@@ -52,7 +52,7 @@ inter_3: .long 0
 .global main
 
 #########
-conv_b: #bazu, str, duzinu
+conv_b: #bazu, str, #duzinu
 	pushl %ebp
 	movl %esp, %ebp
 	pushl %esi
@@ -60,7 +60,6 @@ conv_b: #bazu, str, duzinu
 	pushl %ebx
 	movl 8(%ebp), %edi
 	movl 12(%ebp), %esi
-	#movl 16(%ebp), %edi
 	xorl %eax, %eax
 	xorl %ecx, %ecx
 	movl %edi, %ecx
@@ -84,38 +83,54 @@ conv_b: #bazu, str, duzinu
 			jmp check
 			special:
 				cmpb baza(,%edx,4), %bl
-				jne greska
+				jne err
 		inc_check:
 			incl %esi
 			jmp conv
 		
 	
 	conv_end:
+	cmpl 12(%ebp), %esi
+	je err
+	popl %ebx
+	popl %edi
+	popl %esi
 	movl %ebp, %esp
 	popl %ebp
 	ret
 #######
 
 main:
-	#BROJ 1
+	#BROJ 1:
+	#PORUKA
 	movl $4, %eax
 	movl $1, %ebx
 	leal ulaz1, %ecx
 	movl $len_u1, %edx
 	int $0x80
-	
+	#UNOS BAZE 1
 	movl $3, %eax
 	movl $0, %ebx
 	leal bstr1, %ecx
 	movl $3, %edx
 	int $0x80
 	
+	movl $10, %eax
+	movl bstr1, %ebx
+	pushl %ebx
+	pushl %eax
+	call conv_b
+	addl $8, %esp
+	movl %eax, baza1
+	
+	
+	#PORUKA BROJ 1
 	movl $4, %eax
 	movl $1, %ebx
 	leal ulaz2, %ecx
 	movl $len_u2, %edx
 	int $0x80
-	
+	#UNOS BROJA 1
 	movl $3, %eax
 	movl $0, %ebx
 	leal str1, %ecx
@@ -161,12 +176,13 @@ main:
 	int $0x80
 	
 	
-	movl bstr1, %esi
-	xorl %eax, %eax
-	xorl %ebx, %ebx
-	movl $10, %ecx
 	
-	
+err:
+	movl $4, %eax
+	movl $1, %ebx
+	leal greska2, %ecx
+	movl $len_gr2, %edx
+	int $0x80
 		
 	
 end:
