@@ -20,6 +20,7 @@ int gotoxy(int x, int y);
 void printchr(int chr);
 void printstr(char* str);
 void printnum(int num);
+void scroll_down();
 
 // memorija za emulirani ekran
 unsigned char screen[SCRSIZE];
@@ -140,6 +141,12 @@ void test4() {
         wait(25);
     }
 }
+/*void test4(){
+	for(int i = 0; i < 4; i ++){
+		scroll_down();
+		wait(250);
+	}
+}*/
 
 // testiranje gotoxy i ispisa brojeva
 void test5() {
