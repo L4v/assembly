@@ -37,6 +37,7 @@ dec: .long 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ,10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
 strlen = 30
 str1: .fill strlen, 1, 0
 str2: .fill strlen, 1, 0
+str3: .fill strlen, 1, 0
 bstr1: .fill 3, 1, 0
 bstr2: .fill 3, 1, 0
 bstr3: .fill 3, 1, 0
@@ -52,6 +53,53 @@ inter_3: .long 0
 .global main
 
 #########
+
+conv_a:#baza, broj, str
+	pushl %ebp
+	movl %esp, %ebp
+	pushl %esi
+	pushl %edi
+	movl 8(%ebp), %ecx
+	movl 12(%ebp), %eax
+	movl 16(%ebp), %esi
+	
+	conva:
+		xorl %edx, %edx
+		andl %eax, %eax
+		jz pre_flip
+		divl %ecx
+		addb $'0', %dl
+		movb %dl, (%esi)
+		incl %esi
+		jmp conva
+	
+	pre_flip:
+		movb $0, (%esi)
+		decl %esi
+		movl 16(%ebp), %edi
+		jmp flip
+		xorl %eax, %eax
+		xorl %ecx, %ecx
+		
+	flip:
+		cmpl %esi, %edi
+		jae conva_end
+		movb (%esi), %al
+		movb (%edi), %cl
+		movb %cl, (%esi)
+		movb %al, (%edi)
+		incl %edi
+		decl %esi
+		jmp flip
+		
+	
+conva_end:
+	popl %edi
+	popl %esi
+	movl %ebp, %esp
+	popl %ebp
+	ret
+
 conv_b: #bazu, str, #duzinu
 	pushl %ebp
 	movl %esp, %ebp
@@ -61,29 +109,32 @@ conv_b: #bazu, str, #duzinu
 	movl 8(%ebp), %edi
 	movl 12(%ebp), %esi
 	xorl %eax, %eax
-	xorl %ecx, %ecx
 	movl %edi, %ecx
 	decl %edi
 	conv:
 		xorl %ebx, %ebx
-		xorl %edx, %edx
-		movb (%esi), %bl#123N
+		xorl %ecx, %ecx
 		cmpb $0, (%esi)
 		je conv_end
+		cmpb $10, (%esi)
+		je conv_end
+		movb (%esi), %bl#123N
 		check:
-			cmpl %edx, %edi
+			cmpl %ecx, %edi
 			je special
-			cmpb baza(, %edx, 4), %bl
+			cmpb baza(, %ecx, 1), %bl
 			jne not
-			mull %ecx
-			addl dec(,%edx, 4), %eax
+			mull 8(%ebp)
+			addl dec(,%ecx, 4), %eax
 			jmp inc_check
 			not:
-			incl %edx
+			incl %ecx
 			jmp check
 			special:
-				cmpb baza(,%edx,4), %bl
+				cmpb baza(,%ecx,1), %bl
 				jne err
+				mull 8(%ebp)
+				addl dec(,%ecx, 4), %eax
 		inc_check:
 			incl %esi
 			jmp conv
@@ -116,7 +167,7 @@ main:
 	int $0x80
 	
 	movl $10, %eax
-	movl bstr1, %ebx
+	leal bstr1, %ebx
 	pushl %ebx
 	pushl %eax
 	call conv_b
@@ -137,6 +188,14 @@ main:
 	movl $30, %edx
 	int $0x80
 	
+	movl baza1, %eax
+	leal str1, %ebx
+	pushl %ebx
+	pushl %eax
+	call conv_b
+	addl $8, %esp
+	movl %eax, inter_1
+	
 	#BROJ 2
 	movl $4, %eax
 	movl $1, %ebx
@@ -150,6 +209,15 @@ main:
 	movl $3, %edx
 	int $0x80
 	
+	movl $10, %eax
+	leal bstr2, %ebx
+	pushl %ebx
+	pushl %eax
+	call conv_b
+	addl $8, %esp
+	movl %eax, baza2
+	
+	#UNOS BROJA 2
 	movl $4, %eax
 	movl $1, %ebx
 	leal ulaz2, %ecx
@@ -158,9 +226,17 @@ main:
 	
 	movl $3, %eax
 	movl $0, %ebx
-	leal str1, %ecx
+	leal str2, %ecx
 	movl $30, %edx
 	int $0x80
+	
+	movl baza2, %eax
+	leal str2, %ebx
+	pushl %ebx
+	pushl %eax
+	call conv_b
+	addl $8, %esp
+	movl %eax, inter_2
 	
 	#BAZA 3
 	movl $4, %eax
@@ -175,7 +251,31 @@ main:
 	movl $3, %edx
 	int $0x80
 	
+	movl $10, %eax
+	leal bstr3, %ebx
+	pushl %ebx
+	pushl %eax
+	call conv_b
+	addl $8, %esp
+	movl %eax, baza3
 	
+	movl inter_1, %eax #baza, broj, str
+	addl inter_2, %eax
+	movl baza3, %ecx
+	leal str3, %ebx
+	pushl %ebx
+	pushl %eax
+	pushl %ecx
+	call conv_a
+	addl $12, %esp
+	
+	#ISPIS REZULTATA
+	movl $4, %eax
+	movl $1, %ebx
+	leal str3, %ecx
+	movl $30, %edx
+	int $0x80
+	jmp end
 	
 err:
 	movl $4, %eax
