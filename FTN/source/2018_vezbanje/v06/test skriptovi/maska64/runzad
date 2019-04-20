@@ -1,0 +1,30 @@
+#expect skript za pokretanje zadataka sa ulazom
+#set timeout 1
+#set send_human {.1 .3 1 .05 2}
+spawn -noecho [lindex $argv 0]
+for {set i 1} {$i < [llength $argv]} {incr i 1} {
+    sleep 0.2
+    send -- "[lindex $argv $i]"
+    send "\r"
+}
+expect eof
+catch wait reason
+set sig [lindex $reason 5]
+if {$sig == ""} {
+    set code [lindex $reason 3]
+} elseif {$sig == "SIGFPE"} {
+    set code [expr 128+8]
+} elseif {$sig == "SIGSEGV"} {
+    set code [expr 128+11]
+} elseif {$sig == "SIGINT"} {
+    set code [expr 128+2]
+} elseif {$sig == "SIGILL"} {
+    set code [expr 128+4]
+} elseif {$sig == "SIGKILL"} {
+    set code [expr 128+9]
+} else {
+    set code [expr 128+1]
+}
+#puts "\033\[01;31m$sig\033\[00m"
+exit $code
+

@@ -1,0 +1,1726 @@
+#!/bin/bash
+# skript za automatsko testiranje provera za Arhitekturu računara
+# verzija 2019-04-27
+
+
+
+# PODEŠAVANJA RADA SKRIPTA
+PODGRUPA=''             # '<podgrupa> <fajl> <kljucna_reč>'
+WAIT=5                  # maksimalno vreme koje se čeka da se (pot)program izvrši (sekunde)
+MAXLIN=25               # maksimalan broj linija izlaza koji će se gledati
+EDITOR=gedit            # program za otvaranje source fajlova
+DIFFPRG=fldiff          # grafički program za upoređivanje (kompare, xxdiff,...)
+NOEXIT=0                # ignorisanje izlaznog koda (0 - ne, 1 - da)
+
+
+
+# NAPOMENE
+
+# Za pregledanje zadataka, skriptu je neophodna struktura direktorijuma kakva je dobijena u arhivi:
+#       zadatak/      - ovde se raspakuje studentsko rešenje
+#       zadatak-old/  - zadatak prethodnog studenta (za poređenje rešenja)
+#       zadatak-unm/  - nemodifikovano studentsko rešenje (za kreiranje patch-a)
+#       tekst/        - tekst zadatka
+#       arhive/       - raspakovana arhiva pokupljena sa nastavnih materijala
+#                       (fajlovi sa nazivima provera_YYYY-MM-DD_HH-MM_sXXX.tgz)
+#       x             - ovaj skript
+#       tNN           - fajlovi sa testovima
+#       resenje.S     - tačno rešenje zadatka
+#       glavni.c      - glavni program za zadatke sa potprogramom
+#       template.sh   - fajl za generisanje testiraj.sh skripta
+#       runzad        - expect skript
+#       kill.sh       - skript za čekanje za završetak rada
+
+# Za generisanje skriptova za testiranje (./x -t) su potrebni sledeći fajlovi:
+#       x             - ovaj skript
+#       tNN           - fajlovi sa testovima
+#       resenje.S     - tačno rešenje zadatka
+#       glavni.c      - glavni program za zadatke sa potprogramom
+#       template.sh   - fajl za generisanje testiraj.sh skripta
+#       runzad        - expect skript
+#       kill.sh       - skript za čekanje za završetak rada
+
+# Skriptu je neophodan fajl sistem koji podržava RWX prava
+# (ne radi na NTFS/FAT fajl sistemima!)
+
+# Skriptu su neophodni sledeći programi za rad: bash, grep, diff, sed, expect,
+# fldiff (ili neki drugi vizuelni diff), gedit (ili neki drugi tekst editor)
+
+
+
+# STRUKTURA TEST FAJLOVA
+
+# Test fajlovi sadrže linije koje služe za opis ulaza i izlaza programa. Njihovi nazivi treba
+# da budu u stilu tNN gde je NN dvocifreni redni broj testa.
+#
+# Ulazne linije za opis tekstualnog unosa (read sistemski poziv):
+#       @neki tekst
+#       @neki drugi tekst
+#       @
+#   Može ih biti više, odnosno onoliko koliko različitih ulaza treba uneti za jedno pokretanje programa.
+#   Poslednja linija predstavlja primer unosa praznog stringa (samo Enter). Zbog trenutnog ograničenja
+#   generisanja testiraj.sh fajla, ne treba koristiti ulaz koji se sastoji samo od znaka '#' (@#), koji
+#   se tamo upotrebljava za oznaku prazne linije (biće popravljeno za narednu godinu).
+#
+# Ulazne linije za opis unosa preko promenljivih:
+#       a = 18
+#       niz: .long 1,2,3,4,5
+#       b: .byte 0
+#   Promenljive i konstante se definišu isto kao i u asemblerskom programu. Da bi ovo radilo, studenti
+#   moraju zadržati nazive promenljivih onako kako su zadate u inicijalnom zad.S fajlu. Ako to nije slučaj,
+#   studentski zadatak se mora ili prepraviti da koristi takve nazive ili pregledati ručno.
+#
+# Izlazne linije za opis tekstualnog izlaza:
+#       #izlaz3
+#       #str1
+#       #
+#   Da bi automatsko prepoznavanje tekstualnog izlaza radilo, mora postojati promenljiva sa inicijalnim
+#   tekstom za izlaz, npr:
+#       izlaz3: .ascii "Rezultat je:"
+#   iza koje treba da bude ispisan rezultat rada programa. Sam tekst te promenljive je nebitan, bitno je
+#   da se nakon ispisa teksta iz promenljive koja se tako zove na ekranu ispisuje rezultat rada.
+#   Skript će onda porediti linije studentskog izlaza koje počinju tim tekstom sa linijama tačnog izlaza.
+#   Takvih linija može biti više, odnosno može se proveravati više izlaza ako ih program ima. Da bi ovo
+#   radilo, studenti moraju zadržati nazive promenljivih onako kako su zadate u inicijalnom zad.S fajlu.
+#   Ako to nije slučaj, studentski zadatak se mora ili prepraviti da koristi takve nazive ili pregledati ručno.
+#   Može se porediti i kompletan izlaz programa ukoliko se kao provera izlaza unese samo taraba i tada to mora
+#   biti jedina linija za opis tekstualnog izlaza
+#
+# Izlazne linije za opis izlaza preko promenljivih:
+#       #R 4
+#       #niz 8@10
+#       #Greska 1g
+#   U svakoj linije za opis promenljive treba da stoji njen naziv i opis za prikaz i proveru. Opis provere
+#   i ispisa može biti jedan od sledećih:
+#       1, 2, 4 ili 8     - kao 1,2,4 ili 8-bajtna promenljiva, dekadni sistem, označeno
+#       1u, 2u, 4u ili 8u - kao 1,2,4 ili 8-bajtna promenljiva, dekadni sistem, neoznačeno
+#       1x, 2x, 4x ili 8x - kao 1,2,4 ili 8-bajtna promenljiva, heksadecimalni sistem
+#       1g, 2g, 4g ili 8g - kao 1,2,4 ili 8-bajtna promenljiva, dekadni sistem, označeno, promenljiva za grešku
+#   Opis provere može na kraju imati dodatak "@X", gde je X broj elemenata niza koji se proverava.
+#   Ako je neka promenljiva označena kao promenljiva za grešku, to utiče na proveru tačnosti rešenja:
+#       - ako je greška = 0, ostale promenljive moraju da se poklapaju sa tačnim rešenjem
+#       - ako je greška != 0, vrednosti ostalih promenljivih se ne posmatraju
+#   Provere promenljivih se mogu kombinovati sa proverama tekstualnog izlaza.
+#
+# Test fajl može da sadrži i liniju sa težinskim faktorima, npr: (zasad se ne koristi)
+#   //TEZINA 15
+#   //TEZINA -10
+#   //TEZINA 15 -5
+#   //TEZINA -15 30
+# Pozitivna vrednost će se dodavati ako je test prošao, negativna ako nije. Ukoliko je
+# neka od vrednosti, pozitivna ili negativna, nije navedena, podrazumeva se da je 0.
+# Na kraju se ispisuje i procenat ovakvih težinskih poena, ako su zadati (ukupna suma se
+# računa tokom prolaska kroz testove, pri čemu se sabiraju samo pozitivne vrednosti)
+# Ako se zada i broj poena za test (-p), ispisaće se i koliko bi poena bilo osvojeno.
+#
+# Testiranje potprograma
+#
+# Za testiranje potprograma treba napraviti fajl "glavni.c" u kome će se nalaziti glavni program za pozivanje
+# potprograma. Glavni program treba da bude napravljen tako da je ulaz sa tastature, a izlaz na ekran (pogledati
+# primere). Glavni program takođe treba da sadrži deklaraciju promenljive RUNPP_REG_ERR, kao i return liniju kako
+# je data u template fajlu za glavni.c. Ovaj glavni program se daje i studentima prilikom testa.
+#
+# Ukoliko potprogram vraća vrednost greške, nju treba postaviti u promenljivu 'g' i ta vrednost se vraća
+# kao izlazni kod glavnog programa.
+#
+# Pored fajla 'glavni.c', u template direktorijumu je dat i 'funkcije.c' u kome se nalaze razne funkcije za ispis
+# koje su se pokazale kao zgodne prethodnih godina, te se mogu iskoristiti za pravljenje ispisa.
+#
+# Test fajlovi se prave tako da se opisuju ulazne linije, a kao izlaz se posmatra kompletan izlaz (#). Za ovako
+# pripremljene testove se može napraviti testiraj.sh koji se može dati studentima za samostalno testiranje.
+
+
+# PODGRUPE
+
+# Skript podržava rad sa dve podgrupe, 'a' i 'b'. Nazivi test fajlova i direktorijuma za rešenje
+# za podgrupu 'a' su isti kao kada se podgrupe ne koriste. Ako se podgrupe koriste, treba napraviti
+# i fajl resenje2.S i u njega staviti rešenje zadatka za podgrupu 'b'. Nazivi test fajlova
+# za podgrupu 'b' treba da imaju oblik 'tbNN' umesto sa 'tNN' i treba da se nalaze u osnovnom
+# direktorijumu, gde su i test fajlovi za podgrupu 'a'.
+#
+# Da bi skript mogao da automatski odredi podgrupu, treba postaviti promenljivu PODGRUPA (prva na
+# spisku promenljivih podešavanja) na string:
+#
+#   PODGRUPA='<podgrupa> <fajl> <kljucna_reč>'
+#
+# gde je <podgrupa> slovo 'a' ili 'b', a <fajl> je fajl u kome će se tražiti <kljucna_reč> (može
+# biti i regularan izraz po 'grep -E' sintaksi). Na primer:
+#
+#   PODGRUPA='a zad.S izlaz2:'
+#
+# će definisati da će podgrupa biti 'a' ukoliko se u fajlu 'zad.S' nalazi tekst 'izlaz2:', a u suprotnom
+# će podgrupa biti 'b'. Ukratko, treba uočiti nešto što sigurno razlikuje zadatke za podgrupe. Takođe,
+# zadatke za podgrupe treba zadati tako da budu dovoljno različiti, da se može odraditi automatsko
+# razlikovanje podgrupa.
+
+
+
+# PRIMERI UPOTREBE
+
+#   ./x -h
+# Prikazuje sve opcije koje skript podržava (neke opcije isključuju upotrebu pojedinih drugih opcja)
+#
+#   ./x -d 05
+# Raspakuje arhivu sa radnog mesta 05, pokreće testove i prikazuje vizuelni diff
+#
+#   ./x
+# Ponovo pokreće testove sa tekućim studentom (npr, nakon izmene koda), bez prikaza vizuelnog diff-a
+#
+#   ./x -r "t14 t15"
+# Ponovo pokreće testove sa tekućim studentom, ali samo t14 i t15
+#
+#   ./x -g b 06
+# Zadaje da je podgrupa 'b', raspakuje arhivu sa radnog mesta 05 i pokreće testove
+#
+#   ./x -n -d
+# Raspakuje arhivu sa sledećeg radnog mesta (npr. ako je tekuće bilo 05, onda raspakuje 06),
+# pokreće testove i prikazuje vizuelni diff
+#
+#   ./x -s
+# Ukoliko su prilikom pregleda zadatka napravljene izmene na studentskom rešenju kako bi se
+# ono popravilo ili videlo da li nakon uklanjanja neke greške ostatak programa radi, te izmene
+# se mogu sačuvati u 'arhive/XX.patch' fajlu radi kasnije prezentacije studentu kada dođe na
+# uvid u rad (da se pokaže kako je rešenje trebalo da izgleda) ili čisto za evidenciju...
+#
+#   ./x -a 07
+# Raspakuje arhivu sa radnog mesta 07 i primenjuje na njega zapamćene izmene (arhive/07.patch)
+# Nakon primene izmena, otvara vizuelni diff alat za sve izmenjene fajlove
+#
+#   ./x -t
+# Pokreće generisanje testiraj.sh fajla za sve test fajlove, a na osnovu izlaza tačnog rešenja.
+# Ukoliko postoje podgrupe, generisaće testiraj.sh za podgrupu 'a'. Za podgrupu 'b' treba
+# upotrebiti opciju '-g b'. Ukoliko ne treba staviti sve test fajlove, treba uoptrebiti opciju -r
+#
+#   ./x -p 20   (zasad se ne koristi)
+# Zadavanje broja poena na testu. Ukoliko test fajlovi imaju težinske faktore u sebi, nakon
+# odrađenih testova će se ispisati koliko poena je student dobio od maksimalnih 20. Ukoliko
+# težinskih faktora nema, računaće se da svaki test nosi 1 poen.
+#
+#   ./csv 20    (zasad se ne koristi)
+# Pored 'x' skripta, u direktorijumu se nalazi i 'csv' skript koji pokreće testiranje za sva
+# radna mesta i generiše fajl sa rezultatima koji se direktno može uvesti u evidenciju.
+# Jedini parametar koji se mora navesti je maksimalan broj poena koji test nosi. Korišćenje
+# ove opcije bi trebalo da bude praćeno i težinskim faktorima u svim testovima. U principu je
+# napravljeno za neku eventualnu kasniju upotrebu, zasad eksperimentalno.
+
+
+
+# INTERNE PROMENLJIVE
+TYPE=1                  # 1 - program, 2 - potprogram
+ZADATAKDIR=zadatak/     # direktorijum sa studentskim rešenjem
+ZADATAKOLD=zadatak-old/ # direktorijum sa prethodnim studentskim rešenjem (radi provere prepisivanja)
+ZADATAKUNM=zadatak-unm/ #  direktorijum za nemodifikovan studentski zadatak
+TEMP=/tmp/ar/           # direktorijum za privremeno raspakivanje
+ARHIVE=arhive/          # direktorijum sa svim arhivama
+RESENJEF=resenje.S      # naziv fajla sa tačnim rešenjem
+RESENJE2F=resenje2.S    # naziv fajla sa tačnim rešenjem za drugu grupu
+ZADATAKF=zad.S          # naziv fajla sa studentskim rešenjem
+GLAVNIF=glavni          # naziv fajla sa glavnim programom za testiranje
+GLAVNI2F=glavni2        # naziv fajla sa glavnim programom za testiranje za drugu grupu
+RUNPP=runpp             # naziv fajla sa pomoćnim potprogramom za pokretanje studentskih potprograma
+KILLED=./killed         # ovde se upisuje tekst KILLED ako je (pot)program prekinut posle zadatog vremena
+ERRVAR=0                # promenljiva za grešku, ukoliko rešenje ima i izlaz za grešku
+WARNING=0               # da li je bilo upozorenja prilikom kompajliranja
+
+GRUPA=""                # a ili b grupa
+GRUPATXT=""             # tekst za ispis grupe
+FORCEGROUP=""           # forsiraje grupe
+DIFF=true               # da li će se koristiti vizuelni diff ili ne
+KEEP=0                  # da li zadržati tekući zadatak direktorijum
+SILENT=0                # da li ispisati samo finalni procenat (za csv fajl)
+MAXPOINTS=0             # broj poena koje nosi zadatak (za csv fajl)
+SPATCH=0                # da li se kreira patch
+LPATCH=0                # da li se primenjuje patch
+NEXTST=0                # da li se prelazi na sledećeg sudenta
+WEIGHT=0                # težina tekućeg testa
+TOTALWEIGHT=0           # ukupna težina testova
+POINTS=0                # ukupan broj osvojenih poena
+
+GENTEST=0               # da li se radi generisanje skripta za automatsko testiranje
+template=()             # ovde se smeštaju TESTNN i OUTPNN linije skripta
+tempcnt=0               # tekući redni broj testa
+tempcnts=""             # tekući redni broj testa u obliku %02d
+tempnums=""             # redni brojevi obrađenih testova (01 02 ...)
+tempexit=""             # izlazni kodovi testova
+
+#hvatanje glibc grešaka na stderr umesto direktno na ekran
+export LIBC_FATAL_STDERR_=1
+
+#proširena sintaksa za glob
+shopt -s extglob
+
+#provera da li je zadatak sa potprogramom
+if [ $(grep -c "main:" $RESENJEF) == "0" ]; then TYPE=2; fi
+
+#sredi prava skriptova
+chmod 775 x 2>/dev/null
+chmod 775 kill.sh 2>/dev/null
+chmod 775 testiraj.sh 2>/dev/null
+
+DIFF=$DIFFPRG
+
+
+
+##############################################################################
+#                            GENERALNE FUNKCIJE
+##############################################################################
+
+# trim all whitespace
+function trim() {
+    local var="$1"
+    # remove leading whitespace characters
+    var="${var#"${var%%[![:space:]]*}"}"
+    # remove trailing whitespace characters
+    var="${var%"${var##*[![:space:]]}"}"
+    echo -n "$var"
+}
+
+# trim newline
+function trimnl() {
+    local var="$1"
+    # remove leading whitespace characters
+    var="${var#"${var%%[!$'\n']*}"}"
+    # remove trailing whitespace characters
+    var="${var%"${var##*[!$'\n']}"}"
+    echo -n "$var"
+}
+
+# ispis poruka u boji
+# - string za ispis sa [r],[g],[b],[m],[c],[n]
+# - ako se zada -c NN, tekst će se centrirati na NN karaktera
+# - ako se zada -n, neće se ispisati newline nakon ispisa
+function colecho {
+    if [ $SILENT -eq 0 ]; then
+        nonewl=0
+        width=0
+        if [ "$1" == "-c" ]; then
+            width=$2
+            shift 2
+        fi
+        if [ "$1" == "-n" ]; then
+            nonewl=1
+            shift
+        fi
+        output="$1"
+        chars=${output//\[[a-z]\]/}
+        if [ "$2" == "" ]; then output="${output}\e[00m"; fi
+        output=${output//\[r\]/\\e\[01;31m}
+        output=${output//\[g\]/\\e\[01;32m}
+        output=${output//\[b\]/\\e\[01;34m}
+        output=${output//\[m\]/\\e\[01;35m}
+        output=${output//\[c\]/\\e\[01;36m}
+        output=${output//\[n\]/\\e\[00m}
+        if [ "$width" != "0" ]; then
+            textsize=${#chars}
+            if [ $width -gt $textsize ]; then
+                span=$((($width - $textsize) / 2))
+                printf "%${span}s" ""
+            fi
+        fi
+        if [ $nonewl -eq 0 ]; then
+            echo -e "$output"
+        else
+            echo -n -e "$output"
+        fi
+    fi
+}
+
+function usage {
+    colecho "[b]Script for automatic testing of AR exams"
+    colecho "\nUsage: [b]$0[n] [g][OPTIONS] [c][PLACE]"
+    colecho "\nWithout arguments - start testing with current files"
+    colecho "If [c]PLACE[n] [[c]00-31[n]] is given, unpack archive for that workplace and start testing"
+    colecho "\nOptions:"
+    colecho "[g]-n[n]            Unpack the archive of next student and start testing"
+    colecho "[g]-r[n] <TESTS>    Run only specified tests (t12, \"t10 t12 t13\")"
+    colecho "[g]-d[n]            Display visual diff of student and original files"
+    colecho "[g]-s[n]            Save changes made by you to a patch file in 'arhive' directory"
+    colecho "[g]-a[n] <PLACE>    Apply saved patch to archive from workplace PLACE [00-31], and show differences"
+    colecho "[g]-g[n] <GROUP>    Override group detection (a/b)"
+    colecho "[g]-t[n]            Generate testiraj.sh file (must be used with -g for 'b' group)"
+    colecho "[g]-c[n]            Clean all temporary files"
+    colecho "[g]-p[n] <POINTS>   POINTS is max number of points for test"
+    colecho "[g]-q[n]            Quiet testing (for CSV creation), must be used with -p"
+    colecho "[g]-h[n]            This help"
+}
+
+# brisanje privremenih fajlova
+function clear_temp_files {
+    rm -f outtermt.txt outgdbt.txt outterms.txt outgdbs.txt gdb.cmd $ZADATAKDIR/gdb.cmd 2>/dev/null
+    rm -f expgdb.sh armain outterm.txt outgdb.txt *.o 2>/dev/null
+    if [ ${#TESTS[@]} -ne 1 ]; then
+        rm -f $ZADATAKDIR/zad_test.S resenje_test.S glavni_run.c runpp_run.S glavni_run.o $ZADATAKDIR/armain 2>/dev/null
+    fi
+}
+
+##############################################################################
+#           PRIPREMA ZA POKRETANJE GDB-a I POSTAVLJANJE PROMENLJIVIH
+##############################################################################
+
+function prepare_gdb() {
+    #$1 - file (with path)
+    #$2 - var name
+    #$3 - var size (1,2,4,8, ...)
+    #$4 - var name ...
+    filename="$1"
+    filepath=$(dirname "$1")
+    if [ "$filepath" == "" ]; then
+        filepath="."
+    fi
+    shift
+    #izdvajanje svih linija iz source-a koje sadrže int $0x80, zajedno sa rednim brojem linije
+    ints=$(grep -n -E "int[[:space:]]+(([$]0x80)|([$]128))" "$filename")
+    oldIFS="$IFS"; IFS=$'\n'
+    ints=($ints)
+    IFS="$oldIFS"
+    #ukupan broj izdvojenih linija
+    n=${#ints[@]}
+    #za svaku liniju dodaj uslovni breakpoint (break samo ako je EXIT sistemski poziv)
+    for ((i=0; i<n; i++)); do
+        line=${ints[i]%%:*}
+        if [ $i -eq 0 ]; then
+            echo "break $line if \$eax == 1" > "$filepath"/gdb.cmd
+        else
+            echo "break $line if \$eax == 1" >> "$filepath"/gdb.cmd
+        fi
+    done
+    #redirekcija izlaza programa
+    echo "set args -s >& outterm.txt" >> "$filepath"/gdb.cmd
+    #nakon definisanja tačaka prekida, ide startovanje programa
+    echo "run" >> "$filepath"/gdb.cmd
+    #kada se stigne do tačke prekida, a u pitanju je EXIT, ispiši promenljive
+    unset varnames
+    unset varlines
+    varnames=()
+    varlines=()
+    varnum=0
+    ERRVAR=99
+    while [ "$1" != "" ]; do
+        disp=$2
+        #odredi broj elemenata za prikaz
+        num=1
+        if [[ $disp =~ .*@[0-9]+ ]]; then
+            num=${disp#*@}
+            disp=${disp%@*}
+        fi
+        case $disp in
+            #opisi promenljivih sa dekadnim označenim ispisom
+            1)  echo "x /${num}db &$1" >> "$filepath"/gdb.cmd
+            ;;
+            2)  echo "x /${num}dh &$1" >> "$filepath"/gdb.cmd
+            ;;
+            4)  echo "x /${num}dw &$1" >> "$filepath"/gdb.cmd
+            ;;
+            8)  echo "x /${num}dg &$1" >> "$filepath"/gdb.cmd
+            ;;
+            #opisi promenljivih sa dekadnim neoznačenim ispisom
+            1u) echo "x /${num}ub &$1" >> "$filepath"/gdb.cmd
+            ;;
+            2u) echo "x /${num}uh &$1" >> "$filepath"/gdb.cmd
+            ;;
+            4u) echo "x /${num}uw &$1" >> "$filepath"/gdb.cmd
+            ;;
+            8u) echo "x /${num}ug &$1" >> "$filepath"/gdb.cmd
+            ;;
+            #opisi promenljivih sa heksadecimalnim ispisom
+            1x) echo "x /${num}xb &$1" >> "$filepath"/gdb.cmd
+            ;;
+            2x) echo "x /${num}xh &$1" >> "$filepath"/gdb.cmd
+            ;;
+            4x) echo "x /${num}xw &$1" >> "$filepath"/gdb.cmd
+            ;;
+            8x) echo "x /${num}xg &$1" >> "$filepath"/gdb.cmd
+            ;;
+            #opisi promenljivih za grešku sa dekadnim označenim ispisom
+            1g)  echo "x /1db &$1" >> "$filepath"/gdb.cmd
+                 ERRVAR=$varnum
+            ;;
+            2g)  echo "x /1dh &$1" >> "$filepath"/gdb.cmd
+                 ERRVAR=$varnum
+            ;;
+            4g)  echo "x /1dw &$1" >> "$filepath"/gdb.cmd
+                 ERRVAR=$varnum
+            ;;
+            8g)  echo "x /1dg &$1" >> "$filepath"/gdb.cmd
+                 ERRVAR=$varnum
+            ;;
+        esac
+        varnames[$varnum]=$1
+        #gdb štampa vrednosti nizova sa x komandom po 4 u redu, pa se računa broj linija sa podacima
+        varlines[$varnum]=$((num/4 + (num%4 > 0)))
+        varnum=$((varnum+1))
+        shift
+        shift
+    done
+    echo "continue" >> "$filepath"/gdb.cmd
+    echo "quit" >> "$filepath"/gdb.cmd
+}
+
+#priprema kopije zadatka sa vrednostima primenljivih i konstanti iz tekućeg testa
+# $1 - file (with path)
+# $2 - var type (k ili p)
+# $3 - var name
+# $4 - var value
+# $5 - var type ...
+function prepare_zad() {
+    filename=$(basename "$1")
+    extension="${filename##*.}"
+    filename="${filename%.*}"
+    filepath=$(dirname "$1")
+    newfile="${filename}_test.$extension"
+    cp "$1" "$filepath/$newfile"
+    shift
+    while [ "$1" != "" ]; do
+        #ako je konstanta, traži deklaraciju konstante i zameni sa vrednošću iz testa
+        if [ "$1" == "k" ]; then
+            sed -i -e "s/^[ \t]*$2[ \t]*=.*/$2=$3/" "$filepath/$newfile"
+        #ako je promenljiva, traži deklaraciju promenljive i zameni sa vrednošću iz testa
+        else
+            sed -i -e "s/^[ \t]*$2:.*/$2: $3/" "$filepath/$newfile"
+        fi
+        shift
+        shift
+        shift
+    done
+    echo "$newfile"
+}
+
+
+
+##############################################################################
+#                    FUNKCIJE ZA POKRETANJE JEDNOG TESTA
+##############################################################################
+
+#izvršavanje jednog testa i delimična obrada izlaza
+# $1 - putanja
+# $2 - izvršni fajl
+# $3 - niz za prepoznavanje izlaznih stringova
+#izlaz:
+# code      - izlazni kod
+# killed    - da li je program morao biti nasilno prekinut
+# truncated - da li je izlaz terminala odsečen jer je bio prevelik
+# varval()  - vrednosti posmatranih promenljivih
+# outstr()  - ispisi iza posmatranih stringova
+function run_test() {
+    RUNPATH="$1"
+    RUNNAME="$2"
+    code=0
+    killed=0
+    truncated=0
+
+    #ako ima tekst ulaza, pokreće se preko expect skripta
+    if [ $ulnum -gt 0 ]; then
+        if [ $gdbnum -gt 0 ]; then #ako ima izlaznih promenljivih
+            echo "#!/bin/bash" > expgdb.sh
+            echo "gdb -q --command=$RUNPATH/gdb.cmd $RUNPATH/$RUNNAME" >> expgdb.sh
+            chmod 775 expgdb.sh
+            expect runzad ./expgdb.sh "${ulaz[@]}" 2>&1 1>outgdb.txt &
+            PID=$!
+            #skript koji čeka WAIT sekundi da se program završi
+            ./kill.sh $PID $KILLED $WAIT "KILLED" &
+            wait $PID &> /dev/null
+            code=$?
+        fi
+        #TODO verovatno se ovo može staviti pod else, jer gdb sad generiše i outterm.txt...
+        if [ $outnum -ne 0 ]; then #ako ima izlaznog teksta
+            expect runzad $RUNPATH/$RUNNAME "${ulaz[@]}" 2>&1 1>outterm.txt &
+            PID=$!
+            #skript koji čeka WAIT sekundi da se program završi
+            ./kill.sh $PID $KILLED $WAIT "KILLED" &
+            wait $PID &> /dev/null
+            code=$?
+        fi
+    else #ako nema tekst ulaza
+        if [ $gdbnum -gt 0 ]; then #ako ima izlaznih promenljivih
+            gdb -q --command=$RUNPATH/gdb.cmd $RUNPATH/$RUNNAME 2>&1 1>outgdb.txt &
+            PID=$!
+            #skript koji čeka WAIT sekundi da se program završi
+            ./kill.sh $PID $KILLED $WAIT "KILLED" &
+            wait $PID &> /dev/null
+            code=$?
+        fi
+        if [ $outnum -ne 0 ]; then #ako ima izlaznog teksta
+            $RUNPATH/$RUNNAME 2>&1 1>outterm.txt &
+            PID=$!
+            #skript koji čeka WAIT sekundi da se program završi
+            ./kill.sh $PID $KILLED $WAIT "KILLED" &
+            wait $PID &> /dev/null
+            code=$?
+        fi
+    fi
+
+    #check if process was killed
+    if [ -f $KILLED ]; then
+        killed=1
+        rm $KILLED
+    fi
+
+    #extract registers save information, if any
+    regs=""
+    if [ $(grep -c "RUNPP_REG_ERR" outterm.txt) -ne 0 ]; then
+        regval=$(grep "RUNPP_REG_ERR" outterm.txt)
+        regval=${regval#*:}
+        regval=$(trim "$regval")
+        head -n -2 outterm.txt > outterm2.txt
+        rm outterm.txt
+        mv outterm2.txt outterm.txt
+
+        if [[ $(( regval & 1 )) -ne 0 ]]; then
+            regs="$regs ebx"
+        fi
+        if [[ $(( regval & 2 )) -ne 0 ]]; then
+            regs="$regs esi"
+        fi
+        if [[ $(( regval & 4 )) -ne 0 ]]; then
+            regs="$regs edi"
+        fi
+        if [[ $(( regval & 8 )) -ne 0 ]]; then
+            regs="$regs ebp"
+        fi
+    fi
+
+    #remove null characters from output, change control characters to [code]
+    if [ -f outterm.txt ]; then
+        #truncate output if file is too big
+        lines=$(wc -l outterm.txt | cut -d" " -f1)
+        if [ $lines -gt $MAXLIN ]; then
+            head -n $MAXLIN outterm.txt > outterm2.txt
+            rm outterm.txt
+            mv outterm2.txt outterm.txt
+            truncated=$((lines-MAXLIN))
+        fi
+
+        sed -i 's/\x0//g' outterm.txt
+        for ((i=1; i<32; i++)); do
+            if [ $i -ne 9 ] && [ $i -ne 10 ] && [ $i -ne 13 ]; then
+                hex=$(printf '%X' $i)
+                sed -i "s/\x$hex/[0x$hex]/g" outterm.txt
+            fi
+        done
+        for ((i=128; i<256; i++)); do
+            hex=$(printf '%X' $i)
+            sed -i "s/\x$hex/[0x$hex]/g" outterm.txt
+        done
+    fi
+
+    #add newline if there is none at the end
+    if [ -f outgdb.txt ]; then
+        [ -n "$(tail -c1 outgdb.txt)" ] && echo >> outgdb.txt
+        # remove \r from text
+        mv outgdb.txt temp.txt
+        tr -d '\r' <temp.txt >outgdb.txt
+        rm temp.txt
+    fi
+    if [ -f outterm.txt ]; then
+        [ -n "$(tail -c1 outterm.txt)" ] && echo >> outterm.txt
+        # remove \r from text
+        mv outterm.txt temp.txt
+        tr -d '\r' <temp.txt >outterm.txt
+        rm temp.txt
+    fi
+
+    #obrada gdb izlaza, izlaz:
+    # code - izlazni kod
+    # varval() - vrednosti posmatranih promenljivih
+    unset varval
+    varval=()
+    if [ $gdbnum -gt 0 ]; then
+        code=$(grep --text -o -E "exited normally" < outgdb.txt)
+        if [ "$code" != "" ]; then
+            code="0"
+        else
+            code=$(grep --text -o -E "exited with code [0-9]+" < outgdb.txt)
+            code=${code##* }
+            #konverzija iz oktalnog u dekadni zapis (gdb izlazni kod daje u oktalnom sistemu)
+            code=$((code))
+        fi
+        #vađenje vrednosti promenljivih iz izlaza gdb-a
+        oldIFS="$IFS"; IFS=$'\n'
+        output=($(grep --text -E "^0x[0-9a-f]+.*:" < outgdb.txt))
+        IFS="$oldIFS"
+        varval[$gdbnum]=$code
+        #poslednja promenljiva se dodaje automatski (izlazni kod programa)
+        varnames[$gdbnum]="Output code"
+        #ubacivanje vrednosti u niz i ispis
+        j=0
+        for ((i=0; i<=gdbnum; i++)); do
+            if [ $i -ne $gdbnum ]; then
+                #ako je promenljiva tipa niza, potencijalno je u više linija izlaza
+                lines=$((${varlines[$i]}))
+                val=""
+                for ((l=0;l<lines;l++)); do
+                    val="$val${output[$j]##*:}"
+                    j=$((j+1))
+                done
+                varval[$i]=$(trim "$val")
+            fi
+            #echo "${varnames[$i]} = ${varval[$i]}"
+        done
+    else    #ubaci samo izlazni kod u promenljive
+        varval[0]=$code
+        varnames[0]="Output code"
+    fi
+
+    #obrada tekstualnog izlaza, izlaz:
+    # outstr() - ispisi iza posmatranih stringova
+    if [ $outnum -gt 0 ]; then
+        #http://stackoverflow.com/questions/16461656/bash-how-to-pass-array-as-an-argument-to-a-function
+        name=$3[@]
+        out_strings=("${!name}")
+        unset outstr
+        outstr=()
+        for ((j=0; j<outnum; j++)); do
+            out=$(grep -m 1 --text "${out_strings[$j]}" outterm.txt)
+            out="${out#*${out_strings[$j]}}"
+            outstr[$j]=$(trim "$out")
+        done
+    fi
+}
+
+#sprovođenje jednog testa
+# TODO: užasno velika funkcija, treba je razbiti na manje jednog lepog dana
+# $1 - naziv fajla
+# $2 - boja ispisa zaglavlja
+# $3 - provera izlaza
+#izlaz:
+function do_test() {
+    tfile="$1"
+    if ! [ -f $tfile ]; then
+        return 1
+    fi
+
+    # odredi težinu testa
+    WEIGHT=$(grep -m 1 "//TEZINA" $1 | grep -oE "[+-]?[0-9]+")
+    WEIGHT=$(echo $WEIGHT)
+    NEGWEIGHT=${WEIGHT##* }
+    WEIGHT=${WEIGHT%% *}
+    if [ "$WEIGHT" == "" ]; then WEIGHT=0; fi
+    if [ "$NEGWEIGHT" == "" ]; then NEGWEIGHT=0; fi
+    if [ $WEIGHT -le 0 ] && [ $NEGWEIGHT -ge 0 ]; then
+        w=$WEIGHT
+        WEIGHT=$NEGWEIGHT
+        NEGWEIGHT=$w
+    fi
+    if [ $WEIGHT -lt 0 ]; then WEIGHT=0; fi
+    if [ $NEGWEIGHT -gt 0 ]; then NEGWEIGHT=0; fi
+    TOTALWEIGHT=$((TOTALWEIGHT+WEIGHT))
+
+    outf=$(cat $tfile)
+    colecho "\n\n[b]***********************************************************"
+    colecho -c 60 "[b]Test $tfile, W:$WEIGHT,$NEGWEIGHT :"
+    colecho "[n]$outf\n[b]***********************************************************"
+
+    # ažuriranje promenljivih za generisanje skripta za automatizovano testiranje
+    tempcnt=$((tempcnt + 1))
+    tempcnts=$(printf "%02d" $tempcnt)
+    if [ "$tempnums" == "" ]; then
+        tempnums=$tempcnts
+    else
+        tempnums="$tempnums $tempcnts"
+    fi
+
+    RTEMP=$RESENJE
+    ZTEMP=$ZADATAK
+
+    #određivanje ulaza testa
+    unset ulaz
+    unset prepzad
+    ulaz=()     #niz sa ulazima sa terminala
+    ulnum=0     #broj ulaza sa terminala
+    prepzad=()  #niz sa ulazima preko promenljivih
+    prepnum=0    #broj ulaza preko promenljivih
+    #provera da li ima ulaza sa terminala
+    readarray ulaz <<< "$(cat $tfile | grep -E '^@.*')"   #čita ulaz testa po linijama i stavlja u niz
+    ulazall=$(trimnl "${ulaz[@]}")
+    if [ "$ulazall" == "" ]; then
+        ulnum=0
+    else
+        template+=('TEST'$tempcnts'=$(cat <<EOL')
+        ulnum=${#ulaz[@]}  #broj elemenata
+        for ((i=0; i<ulnum; i++)); do
+            ul=$(trimnl "${ulaz[i]}")
+            ul="${ul:1}"
+            ulaz[$i]="$ul"
+            if [ "$ul" != "" ]; then
+                ul="${ul//\\/\\\\}"
+                ul="${ul//$/\\$}"
+                template+=("$ul")
+            else
+                template+=("#")
+            fi
+        done
+        template+=('EOL')
+        template+=(')')
+        template+=('')
+    fi
+
+    #provera da li ima ulaza preko promenljivih
+    readarray vars <<< "$(cat $tfile | grep -v -E '^//.*' | grep -v -E '^#.*' | grep -v -E '^@.*')"   #čita ulaz testa po linijama i stavlja u niz
+    ulazall=$(trimnl "${vars[@]}")
+    if [ "$ulazall" == "" ]; then
+        prepnum=0
+    else
+        prepnum=${#vars[@]}  #broj elemenata
+        for ((i=0; i<prepnum; i++)); do
+            #provera da li je u liniji definisana konstanta oblika NAME = VALUE
+            if [[ ${vars[i]} =~ ^[\ \t]*[a-zA-Z0-9_]+[\ \t]*=.*$ ]]; then
+                vtype="k"
+                var=$(trim "${vars[i]%%=*}")    #izdvajanje imena konstante
+                value=$(trim "${vars[i]#*=}")   #izdvajanje vrednsti konstante
+                #echo "#$vtype#$var#$value#"
+            else
+                vtype="p"
+                var=$(trim "${vars[i]%%:*}")    #izdvajanje imena promenljive
+                value=$(trim "${vars[i]#*:}")   #izdvajanje vrednosti promenljive
+                #echo "#$vtype#$var#$value#"
+            fi
+            #pripremanje opcija za tekući parametar za prepare_zad funkciju
+            j=$((i*3))
+            prepzad[$j]=$vtype
+            #echo "$j:${prepzad[@]}"
+            j=$((j+1))
+            prepzad[$j]="$var"
+            #echo "$j:${prepzad[@]}"
+            j=$((j+1))
+            prepzad[$j]="$value"
+            #echo "$j:${prepzad[@]}"
+        done
+    fi
+
+    #određivanje izlaza testa
+    unset out_correct
+    unset out_student
+    out_correct=()  #izlazne string promenljive tačnog rešenja
+    out_student=()  #izlazne string promenljive studentskog rešenja
+    outnum=0        #broj izlaznih string promenljivih
+    var_gdb=""      #opis izlaznih numeričkih promenljivih
+    gdbnum=0        #broj izlaznih numeričkih promenljivih
+    readarray izlaz <<< "$(cat $tfile | grep -E '^#.*')"   #čita izlaz testa po linijama i stavlja u niz
+    izlazall=$(trimnl "${izlaz[@]}")
+    if [ "$izlazall" == "" ]; then
+        iznum=0
+    else
+        iznum=${#izlaz[@]}  #broj elemenata
+        for ((i=0; i<iznum; i++)); do
+            iz=$(trimnl "${izlaz[i]}")
+            izlaz[$i]="${iz:1}"
+        done
+        for ((i=0; i<iznum; i++)); do
+            #izdvoji opis izlazne promenljive
+            var=${izlaz[i]}
+            if [ "$var" == "" ]; then   #posmatra se kompletan izlaz
+                outnum=-1
+            else
+                varopt=($var)   #konvertuj string u niz
+                varnum=${#varopt[@]}
+                if [ $varnum -eq 1 ]; then  #izlazna string promenljiva
+                    out=$(grep -E "[[:space:]]*$var[[:space:]]*:" $RESENJE)
+                    out=${out#*\"}      #obriši sve do prvog znaka navoda
+                    out=${out%\\0*}     #obriši sve od \0 do kraja
+                    out=${out//\\n/}    #izbaci sve \n
+                    out=${out%\"*}      #obriši sve od poslednjeg znaka navoda do kraja
+                    out_correct[$outnum]="$out"
+                    if [ "$out" == "" ]; then
+                        colecho "\n[r]Nije nađena promenljiva [$var] u tačnom rešenju!"
+                        exit 1
+                    fi
+                    if [ $GENTEST -eq 0 ]; then
+                        #pokušaj ispravke kada se naziv promenljive i njena inicijalna vrednost ne nalaze u istoj liniji
+                        #prezueto sa http://backreference.org/2009/12/23/how-to-match-newlines-in-sed/
+                        sed -i ":begin;$!N;s/\([[:blank:]]*$var[[:blank:]]*:[[:blank:]]*\)\n/\1/;tbegin;P;D" $ZADATAKDIR/$ZADATAK
+                        #izdvoji string kojim se inicijalizuje promenljiva
+                        out=$(grep -E "[[:space:]]*$var[[:space:]]*:" $ZADATAKDIR/$ZADATAK)
+                        out=${out#*\"}      #obriši sve do prvog znaka navoda
+                        out=${out%\\0*}     #obriši sve od \0 do kraja
+                        out=${out//\\n/}    #izbaci sve \n
+                        out=${out%\"*}      #obriši sve od poslednjeg znaka navoda do kraja
+                        out_student[$outnum]="$out"
+                        if [ "$out" == "" ]; then
+                            colecho "\n[r]Variable [$var] wasn't found in student's solution!"
+                            exit 1
+                        fi
+                    fi
+                    outnum=$((outnum+1))
+                elif [ $varnum -eq 2 ]; then  #izlazna numeričка promenljiva
+                    if [ "$var_gdb" == "" ]; then
+                        var_gdb="${varopt[@]}"
+                    else
+                        var_gdb="$var_gdb ${varopt[@]}"
+                    fi
+                    gdbnum=$((gdbnum+1))
+                else
+                    colecho "\n[r]Bad output line: [$var]"
+                    exit 1
+                fi
+            fi
+        done
+    fi
+
+    #ako ima ulaznih promenljivih, napravi poseban fajl sa tim vrednostima
+    if [ $prepnum -gt 0 ]; then
+        ZADATAK=$(prepare_zad $ZADATAKDIR/$ZADATAK "${prepzad[@]}")
+        RESENJE=$(prepare_zad $RESENJE "${prepzad[@]}")
+    fi
+
+    #ako ima izlaznih promenljivih, priprema se pokretanje gdb-a
+    if [ $gdbnum -gt 0 ]; then
+        prepare_gdb $ZADATAKDIR/$ZADATAK $var_gdb
+        prepare_gdb $RESENJE $var_gdb
+    fi
+
+    #kompajliranje
+    if [ $TYPE -eq 1 ]; then # ako nije potprogram
+        gcc -m32 -g -o armain $RESENJE $rfiles
+        code=$?
+        if [ $code != 0 ]; then
+            colecho "\n[r]Correct solution cannot be compiled!"
+            exit 1
+        fi
+        if [ $GENTEST -eq 0 ]; then
+            studgcc=$(gcc -m32 -g -o $ZADATAKDIR/armain $ZADATAKDIR/$ZADATAK $zfiles 2>&1)
+            code=$?
+        else
+            studgcc=""
+            code=0
+        fi
+    else # ako jeste potprogram
+        # nađi naziv potprograma (deklaracija studentskog rešenja mora biti prva stvar u glavni.c kodu!!!)
+        funname=$(grep -m 1 -E "\)[[:space:]]*;" "${GLAVNI}.c" | grep -o -E "([[:alnum:]]|_)+[[:space:]]*\(" | tr -d "(")
+        # prepravi glavni program da koristi runpp
+        sed "s/\b$funname\b/runpp/g" "${GLAVNI}.c" > "${GLAVNI}_run.c"
+        # prepravi runpp da koristi potprogram
+        sed "s/\bzadatak\b/$funname/g" "${RUNPP}.S" > "${RUNPP}_run.S"
+        # napravi objektni fajl za glavni program, sa uključenim deklaracijama iz tekućeg testa
+        gcc -m32 -g -DLEVEL42 -o armain $RESENJE $rfiles "${GLAVNI}_run.c" "${RUNPP}_run.S"
+        code=$?
+        if [ $code != 0 ]; then
+            colecho "\n[r]Correct solution cannot be compiled!"
+            exit 1
+        fi
+        if [ $GENTEST -eq 0 ]; then
+            studgcc=$(gcc -m32 -g -DLEVEL42 -o $ZADATAKDIR/armain $ZADATAKDIR/$ZADATAK $zfiles "${GLAVNI}_run.c" "${RUNPP}_run.S" 2>&1)
+            code=$?
+        else # ako se radi geneisanje skripta za automatsko testiranje
+            studgcc=""
+            code=0
+        fi
+    fi
+    studgcc=$(trim "$studgcc")
+    if [ "$studgcc" != "" ]; then
+        colecho "$studgcc"
+        if [[ "$studgcc" =~ .*Warning.* ]]; then
+            WARNING=1
+        elif [[ "$studgcc" =~ .*warning.* ]]; then
+            WARNING=1
+        fi
+    fi
+    if [ $code != 0 ]; then
+        colecho "\n[r]Student's solution cannot be compiled!"
+        $EDITOR $ZADATAKDIR/$ZADATAK &
+        exit 1
+    fi
+
+    #generisanje skripta za automatizovano testiranje
+    if [ $GENTEST -ne 0 ]; then
+        run_test "." armain out_correct
+        if [ "$tempexit" == "" ]; then
+            tempexit="$code"
+        else
+            tempexit="$tempexit $code"
+        fi
+        # provera izvršavanja tačnog rešenja
+        correcterror=0
+        if [ "$tregs" != "" ]; then
+            colecho "[r]\nRegisters not saved for correct solution:$regs"
+            correcterror=1
+        fi
+        if [ $truncated -ne 0 ]; then
+            colecho "[r]\nOutput of correct solution was truncated! [b]Increase MAXLIN?"
+            correcterror=1
+        fi
+        if [ $killed -ne 0 ]; then
+            colecho "[r]\nCorrect solution didnt't finish in ${WAIT}s! [b]Increase WAIT?"
+            correcterror=1
+        fi
+        if [ $correcterror -ne 0 ]; then
+            colecho "[r]\nThere were errors with running correct solution, aborting...\n"
+            exit 1
+        fi
+        # Delete all trailing blank lines at end of file (only)
+        sed -i -e :a -e '/^\n*$/{$d;N;};/\n$/ba' outterm.txt
+        readarray izlaz <<< "$(cat outterm.txt)"   #čita izlaz testa po linijama i stavlja u niz
+        izlazall=$(trimnl "${izlaz[@]}")
+        if [ "$izlazall" != "" ]; then
+            template+=('OUTP'$tempcnts'=$(cat <<EOL')
+            iznum=${#izlaz[@]}  #broj elemenata
+            for ((i=0; i<iznum; i++)); do
+                iz=$(trimnl "${izlaz[i]}")
+                iz="${iz//\\/\\\\\\\\}"
+                iz="${iz//$/\\$}"
+                template+=("$iz")
+            done
+            template+=('EOL')
+            template+=(')')
+            template+=('')
+        fi
+        return
+    #izvršavanje testa za tačno rešenje
+    else
+        colecho "[c]CORRECT:"
+        run_test "." armain out_correct
+        tcode=$code
+        tregs=$regs
+        tkilled=$killed
+        ttruncated=$truncated
+        # provera izvršavanja tačnog rešenja
+        correcterror=0
+        if [ "$tregs" != "" ]; then
+            colecho "[r]\nRegisters not saved for correct solution:$regs"
+            correcterror=1
+        fi
+        if [ $truncated -ne 0 ]; then
+            colecho "[r]\nOutput of correct solution was truncated! [b]Increase MAXLIN?"
+            correcterror=1
+        fi
+        if [ $killed -ne 0 ]; then
+            colecho "[r]\nCorrect solution didnt't finish in ${WAIT}s! [b]Increase WAIT?"
+            correcterror=1
+        fi
+        if [ $correcterror -ne 0 ]; then
+            colecho "[r]\nThere were errors with running correct solution, aborting...\n"
+            exit 1
+        fi
+
+        unset tvarval
+        unset toutstr
+        tvarval=("${varval[@]}")
+        toutstr=("${outstr[@]}")
+        cp outgdb.txt outgdbt.txt 2>/dev/null
+        cp outterm.txt outtermt.txt 2>/dev/null
+        if [ $outnum -ne -1 ]; then  #ako se ne posmatra kompletan izlaz
+            colecho "------------[c]OUTPUT[n]----------------"
+            cat outtermt.txt
+        fi
+        if [ $ttruncated -ne 0 ]; then
+            colecho "[r][$ttruncated output line(s) were cut]"
+        fi
+        colecho "------------[c]RESULT[n]----------------"
+        lastvar=gdbnum
+        if [ $NOEXIT -ne 0 ]; then
+            lastvar=$((lastvar - 1))
+        fi
+        for ((i=0; i<=lastvar; i++)); do
+            colecho "${varnames[i]} = [g]${tvarval[i]}"
+        done
+        if [ $outnum -eq -1 ]; then
+            outt=$(cat outtermt.txt)
+            outt=$(trim "$outt")
+            colecho "\n[g]$outt"
+        else
+            for ((i=0; i<outnum; i++)); do
+                colecho "${out_correct[i]}[g]${toutstr[i]}"
+            done
+        fi
+
+        #izvršavanje testa za studentsko rešenje
+        colecho "[m]\n\nSTUDENT:"
+        run_test "$ZADATAKDIR" armain out_student
+        scode=$code
+        sregs=$regs
+        skilled=$killed
+        struncated=$truncated
+        unset svarval
+        unset soutstr
+        svarval=("${varval[@]}")
+        soutstr=("${outstr[@]}")
+        cp outgdb.txt outgdbs.txt 2>/dev/null
+        cp outterm.txt outterms.txt 2>/dev/null
+        if [ $outnum -ne -1 ]; then  #ako se ne posmatra kompletan izlaz
+            colecho "------------[m]OUTPUT[n]----------------"
+            cat outterms.txt
+        fi
+        if [ $struncated -ne 0 ]; then
+            colecho "[r][$ttruncated output line(s) were cut]"
+        fi
+    fi
+
+    colecho "------------[m]RESULT[n]----------------"
+
+    #provera da li je program nasilno prekinut
+    sig=""
+    if [ -f outgdbs.txt ]; then
+        sig=$(grep --text -E "Program terminated with signal" outgdbs.txt)
+    fi
+    if [ "$sig" == "" ] && [ $scode -gt 127 ]; then
+        c=$((scode-128))
+        sig=""
+        if [ $c -eq 8 ]; then sig=", SIGFPE - Floating point exception"; fi
+        if [ $c -eq 11 ]; then sig=", SIGSEGV - Invalid memory segment access"; fi
+        sig="Fatal error signal $c$sig"
+    fi
+    if [ "$sig" == "" ]; then
+        sig=$(grep --text -E "exception" outterms.txt)
+    fi
+    if [ $skilled -ne 0 ]; then
+        sig="Didn't finish after ${WAIT}s!"
+    fi
+    if [ "$sig" != "" ]; then
+        colecho "\n[r]Program was terminated!"
+        colecho "[r]$sig"
+        TERMINATED=$((TERMINATED+1))
+        POINTS=$((POINTS + NEGWEIGHT))
+    else
+        testok=1
+        #provera vrednosti promenljivih i izlaznog koda
+        errvalt=0
+        errvals=0
+        if [ "$ERRVAR" != "99" ]; then
+            errvalt=${tvarval[$ERRVAR]}
+            errvals=${svarval[$ERRVAR]}
+        fi
+        lastvar=gdbnum
+        if [ $NOEXIT -ne 0 ]; then
+            lastvar=$((lastvar - 1))
+        fi
+        for ((i=0; i<=lastvar; i++)); do
+            colecho -n "${varnames[i]} = "
+            if [ "${tvarval[i]}" == "${svarval[i]}" ]; then
+                #ako su vrednosti identične, OK
+                colecho "[g]${svarval[i]}"
+            else
+                if [ $errvalt -ne 0 ] && [ $errvals -ne 0 ] && [ $i -ne $ERRVAR ] && [ $i -ne $gdbnum ]; then
+                    #ako nisu identične i ako je promenljiva za grešku != 0, OK
+                    colecho "[b]${svarval[i]}"
+                elif [ $NOEXIT -ne 0 ] && [ $errvals -ne 0 ] && [ $i -ne $ERRVAR ] && [ $i -ne $gdbnum ]; then
+                    #ako nisu identične i ako je promenljiva za grešku != 0, OK
+                    colecho "[b]${svarval[i]}"
+                else
+                    #ako nisu identične i ako je promenljiva za grešku = 0, ne valja
+                    colecho "[r]${svarval[i]}"
+                    testok=0
+                fi
+            fi
+        done
+
+        #provera tekstualnog izlaza
+        if [ $outnum == -1 ]; then  #ako se posmatra kompletan izlaz
+            outt=$(cat outtermt.txt)
+            outt=$(trim "$outt")
+            outs=$(cat outterms.txt)
+            outs=$(trim "$outs")
+            if [ "$outs" == "$outt" ]; then
+                colecho "\n[g]$outs"
+            else
+#                #kod potprograma, povratna vrednost je greška, pa ako je detektovana greška a izlazi su različiti, to je OK
+#                if [ $TYPE -eq 2 ] && [ $tcode -eq $scode ] && [ $tcode -ne 0 ]; then
+#                    colecho "\n[g]$outs"
+#                else
+                    if [ "$outs" == "" ]; then
+                        colecho "\n[r]<EMPTY OUTPUT>"
+                    else
+                        colecho "\n[r]$outs"
+                    fi
+                    testok=0
+#                fi
+            fi
+        else
+            for ((i=0; i<outnum; i++)); do
+                colecho -n "${out_student[i]}"
+                if [ "${toutstr[i]}" == "${soutstr[i]}" ]; then
+                    colecho "[g]${soutstr[i]}"
+                else
+                    if [ "${soutstr[i]}" == "" ]; then
+                        colecho "[r]<EMPTY OUTPUT>"
+                    else
+                        colecho "[r]${soutstr[i]}"
+                    fi
+                    testok=0
+                fi
+            done
+        fi
+
+        # provera da li su sačuvani registri
+        if [ "$sregs" != "" ]; then
+            colecho "\n[r]Registers not saved:$sregs"
+            testok=0
+        fi
+
+        if [ $testok -eq 1 ]; then
+            TESTOK=$((TESTOK+1))
+            POINTS=$((POINTS + WEIGHT))
+        else
+            TESTBAD=$((TESTBAD+1))
+            POINTS=$((POINTS + NEGWEIGHT))
+        fi
+    fi
+    TESTCNT=$((TESTCNT+1))
+    RESENJE=$RTEMP
+    ZADATAK=$ZTEMP
+}
+
+##############################################################################
+#                    FUNKCIJA ZA RASPAKIVANJE REZULTATA
+##############################################################################
+
+# $1 - radno mesto
+# $2 - direktorijum za raspakivanje
+# $3 - direktorijum za kopiju
+function unpack_student {
+    # kreiraj temp direktorijum ako ne postoji
+    if [ ! -d "$TEMP" ]; then
+        mkdir "$TEMP"
+    fi
+
+    # brisanje direktorijuma pre raspakvanja
+    rm -rf "$2"/* 2>/dev/null
+    rm -rf "$3"/* 2>/dev/null
+    echo $1 > $2/student-sNN
+
+    #raspakivanje arhive; podrazumeva se da je rešenje u /home/provera/br_indeksa
+    tar -C "$TEMP"/ -xzf "$ARHIVE"/provera_*_s?$1.tgz #2>/dev/null
+    OUT=$?
+    if [ $OUT -ne 0 ]; then
+        colecho "[r]Something went wrong with unpacking, exit code $OUT..."
+        exit 1
+    fi
+    idxreg="e[0-9]{4,5}|[a-z]{1,3}[[:space:]/\-]*[0-9]{1,4}[[:space:]/\-]20[0-9]{2}|[a-z]{1,3}[[:space:]/\-]*[0-9]{4,8}|s[0-9]{3}"
+    sindex=$(ls --group-directories-first "$TEMP"/home/provera/ | grep -vi "copy" | grep -m 1 -ioE $idxreg)
+    sindex=$(echo $sindex) #trim
+    if [ "$sindex" == "" ]; then
+        colecho "[r]\nNoone detected on $1"
+        exit 1
+    else
+        SPATH="$TEMP/home/provera/$sindex"
+    fi
+    chmod -R a+rw "$SPATH"
+    mv "$SPATH"/* "$2"/ 2>/dev/null
+    if [ $? -ne 0 ]; then
+        colecho "[r]Something is wrong with student archive..."
+        exit 1
+    fi
+
+    #brisanje nepotrebnih fajlova
+    DELFILES=$ZADATAKDIR/!(*.c|*.S|*.h|student-*)
+    for df in $DELFILES; do
+        rm "$df"
+    done
+
+    #proveri da li postoji zad.S
+    if [ ! -f "$ZADATAKDIR"/"$ZADATAKF" ]; then
+        sfiles=$(ls "$ZADATAKDIR" | grep -c ".S" 2>/dev/null)
+        if [ $sfiles -eq 1 ]; then
+            cd "$ZADATAKDIR"
+            sname=$(ls *.S)
+            mv "$sname" "$ZADATAKF"
+            cd ..
+            colecho "\n[r]File '"$ZADATAKF"' not found, but '$sname' was found, renamed to '"$ZADATAKF"'"
+        elif [ $sfiles -eq 0 ]; then
+            colecho "\n[r]File '"$ZADATAKF"' not found, nor any other .S file.\n"
+            exit 1
+        else
+            colecho "\n[r]File '"$ZADATAKF"' not found, but multiple .S files exist:"
+            (cd "$ZADATAKDIR" && ls)
+            colecho "\n"
+            exit 1
+        fi
+    fi
+
+    #kreiraj fajlove sa indeksom i imenom
+    rm -rf "$TEMP"/*
+    echo $sindex > $2/student-index
+    touch $2/student-name
+
+    #ime studenta (ako je ostavio/la)
+    sname=$(grep -m 1 -i "autor" $ZADATAKDIR/zad.S)
+    if [ $? -ne 0 ]; then
+        sname=$(grep -iE -m 1 "//.*($idxreg).*" $ZADATAKDIR/zad.S)
+    fi
+    #echo a $sname
+    sname=${sname#*AUTOR}
+    #echo b $sname
+    sname=${sname#*autor}
+    #echo c $sname
+    sname=${sname/:/}
+    sname=${sname/,/}
+    sname=${sname/INDEX/}
+    sname=${sname/index/}
+    sname=${sname/INDEKS/}
+    sname=${sname/indeks/}
+    #echo d $sname
+    idx=$(echo $sname | grep -oiE $idxreg)
+    #echo e $idx
+    sname=${sname/$idx/}
+    #echo f $sname
+    sname=$(echo $sname)
+    #echo g "#$sname#"
+    echo $sname > $2/student-name
+
+    # određivanje grupe, a ili b
+    if [ "$FORCEGROUP" != "" ]; then
+        GRUPA=$FORCEGROUP
+    elif [ "$PODGRUPA" == "" ]; then
+        GRUPA="a"
+    else
+        GRUPA=${PODGRUPA%% *}
+        #echo "grupa:#$GRUPA#"
+        PODGRUPA=${PODGRUPA#* }
+        fajl=${PODGRUPA%% *}
+        #echo "fajl:#$fajl#"
+        razl=${PODGRUPA##* }
+        #echo "razl:#$razl#"
+        grep -c "$razl" "$ZADATAKDIR"/$fajl
+        echo $?
+        grep -ciE "$razl" "$ZADATAKDIR"/$fajl 1>/dev/null 2>/dev/null
+        if [ $? -ne 0 ]; then
+            if [ "$GRUPA" == "a" ]; then
+                GRUPA="b"
+            else
+                GRUPA="a"
+            fi
+        fi
+    fi
+    RESENJE=$RESENJEF
+    ZADATAK=$ZADATAKF
+    GLAVNI=$GLAVNIF
+    echo $GRUPA>"$ZADATAKDIR"/student-grupa
+    if [ -f "$RESENJE2F" ]; then GRUPATXT=", Group $GRUPA"; fi
+    if [ "$GRUPA" == "a" ]; then GRUPA=""; fi
+    if [ "$GRUPA" == "b" ]; then
+        RESENJE=$RESENJE2F
+        GLAVNI=$GLAVNI2F
+    fi
+
+    #postavi vreme svih fajlova na trenutno, kako bi tekst editor skontao da je fajl izmenjen
+    touch "$2"/*
+
+    # iskopiraj fajlove i u direktorijum za kopiju
+    cp "$2"/* "$3"/ 1>/dev/null 2>/dev/null
+}
+
+##############################################################################
+#                                   GLAVNI KOD
+##############################################################################
+
+#ulazne promenljive
+prepnum=0       #broj ulaznih promenljivih
+prepzad=()      #niz za definisanje ulaznih promenljivih
+#gdb pripremne promenljive
+gdbnum=0        #broj promenljivih za gdb
+var_gdb=""      #definicija gdb prikaza
+#gdb izlazne promenljive
+varnames=()     #nazivi promenljivih za gdb izlaz
+varlines=()     #linije teksta gdb izlaza
+varnum=0        #broj promenljivih gdb izlaza
+ERRVAR=99       #redni broj promenljive za grešku
+varval=()       #vrednosti posmatranih promenljivih
+#promenljive za tekstualni ulaz
+ulnum=0         #broj linija tekstualnog ulaza
+ulaz=()         #linije ulaznog teksta
+#promenljive za tekstualni izlaz
+outnum=0        #broj linija tekstualnog izlaza (-1 za kompletan izlaz)
+outstr=()       #ispisi iza posmatranih stringova
+out_correct=()  #posmatrani stringovi tačnog rešenja
+out_student=()  #posmatrani stringovi studentskog rešenja
+#generalne promenljive rezultata testa
+code=0          #izlazni kod
+killed=0        #da li je program morao biti nasilno prekinut
+truncated=0     #da li je izlaz programa odsečen jer je bio prevelik
+#promenljive za proveru rezultata
+tcode=0
+tkilled=0
+ttruncated=0
+tvarval=()      #vrednosti posmatranih promenljivih tačnog rešenja
+toutstr=()      #ispisi iza posmatranih stringova tačnog rešenja
+scode=0
+skilled=0
+struncated=0
+svarval=()      #vrednosti posmatranih promenljivih studentskog rešenja
+soutstr=()      #ispisi iza posmatranih stringova studentskog rešenja
+#promenljive za prebrojavanje testova
+TESTCNT=0       #ukupan broj testova
+TESTOK=0        #broj uspešnih testova
+TESTBAD=0       #broj neuspešnih testova
+TERMINATED=0    #broj prekinutih testova
+TESTS=[]        #nazivi test fajlova koje treba pokrenuti
+sused=0
+
+# proveri prosleđene opcije
+while getopts ":hcsndqta:p:g:r:" opt; do
+  case $opt in
+    h)
+        # prikaži uputstvo
+        usage
+        exit 0
+        ;;
+    c)
+        # pobriši sve privremene fajlove
+        colecho "Cleaning [b]temporary files...[n]"
+        clear_temp_files
+        colecho "Cleaning [b]backup files...[n]"
+        rm ./*~ 2>/dev/null
+        colecho "Cleaning [b]zadatak files...[n]"
+        rm -rf "$ZADATAKDIR" 2>/dev/null
+        rm -rf "$ZADATAKOLD" 2>/dev/null
+        rm -rf "$ZADATAKUNM" 2>/dev/null
+        exit 0
+        ;;
+    s)
+        # sačuvaj patch tekućih fajlova u odnosu na originalne studentove
+        SPATCH=1
+        LPATCH=0
+        KEEP=1
+        ;;
+    n)
+        # sledeći student
+        NEXTST=1
+        ;;
+    d)
+        # otvaraj vizuelni diff
+        DIFF=$DIFFPRG
+        ;;
+    t)
+        # generiši testiraj.sh
+        GENTEST=1
+        ;;
+    q)
+        # tihi režim, za generisanje CSV fajla
+        SILENT=1
+        ;;
+    a)
+        # raspakuj arhivu i primeni sačuvani patch
+        LPATCH=$OPTARG
+        SPATCH=0
+        KEEP=0
+        DIFF=$DIFFPRG
+        ;;
+    p)
+        # definiši broj poena za test
+        MAXPOINTS=$OPTARG
+        ;;
+    r)
+        # pokreni samo neke testove
+        TESTS=( $OPTARG )
+        ;;
+    g)
+        # override za detekciju grupe
+        FORCEGROUP=$OPTARG
+        ;;
+    \?)
+        echo "Invalid option: -$OPTARG" >&2
+        exit 1
+        ;;
+    :)
+        echo "Option -$OPTARG requires an argument." >&2
+        exit 1
+        ;;
+  esac
+done
+shift $((OPTIND-1))
+
+if [ $GENTEST -eq 0 ]; then
+    # generisanje zadatak direktorijuma ako ih nema
+    mkdir -p ./"$ZADATAKDIR"
+    mkdir -p ./"$ZADATAKOLD"
+    mkdir -p ./"$ZADATAKUNM"
+
+    #provera da li su instalirani editor i grafički diff
+    missinged=0
+    which $EDITOR 1>/dev/null 2>/dev/null
+    if [ $? -ne 0 ]; then
+        colecho "[r]\nEditor $EDITOR not found!"
+        missinged=1
+    fi
+    which $DIFFPRG 1>/dev/null 2>/dev/null
+    if [ $? -ne 0 ]; then
+        colecho "[r]\nGraphical diff $DIFFPRG not found!"
+        missinged=1
+    fi
+    if [ $missinged -ne 0 ]; then
+        colecho "[r]\nInstall missing programs, or choose another ones...\n"
+        exit 1
+    fi
+    # izbegavanje ispisa GTK upozorenja o DBUS-u
+    export NO_AT_BRIDGE=1
+fi
+
+# prelazak na sledeće radno mesto
+if [ $NEXTST -ne 0 ]; then
+    if [ -f "$ZADATAKDIR"/student-sNN ]; then
+        place=$(cat "$ZADATAKDIR"/student-sNN)
+        place=${place##0}
+        if [ $place -lt 31 ]; then
+            place=$((place + 1))
+            place=$(printf "%02d" $place)
+            eval set -- $place
+        else
+            colecho "[b]You are on the last workplace..."
+            exit 0
+        fi
+    else
+        eval set -- "00"
+    fi
+fi
+
+if [ "$LPATCH" != "0" ]; then
+    eval set -- $LPATCH
+    LPATCH=1
+fi
+
+# ako nema argumenta, radi sa tekućim zadatak direktorijumom
+if [ "$1" == "" ]; then KEEP=1; fi
+
+#zanemari vizuelni diff u silent režimu
+if [ $SILENT -ne 0 ]; then
+    DIFF=true
+    if [ $MAXPOINTS -eq 0 ]; then
+        SILENT=0
+        colecho "[r]You need to use -p option with this!"
+        exit 1
+    fi
+fi
+
+# pogasi diff
+killall -9 $DIFF 2>/dev/null
+
+if [ $GENTEST -eq 0 ]; then
+    if [ $LPATCH -ne 0 ] || [ $KEEP -eq 0 ]; then
+        # čuva se prethodni zadatak radi provere prepisivanja
+        rm -rf "$ZADATAKOLD"/*
+        mv "$ZADATAKUNM"/* "$ZADATAKOLD"/ 2>/dev/null
+
+        unpack_student "$1" "$ZADATAKDIR" "$ZADATAKUNM"
+
+        #provera da li su tekući i prethodni sedeli jedno do drugog
+        #TODO: ovo treba bolje rešiti...
+
+        stud_sold=$(cat "$ZADATAKOLD"/student-sNN 2>/dev/null)
+        curg=$(cat "$ZADATAKDIR"/student-grupa 2>/dev/null)
+        oldg=$(cat "$ZADATAKOLD"/student-grupa 2>/dev/null)
+        #stud_sold=${stud_sold##+(0)}
+        stud_sold=2$stud_sold
+        stud_scur=2$1
+        if [ "$oldg" == "$curg" ] && [ "$stud_sold" != "" ]; then
+            sused=$(($stud_scur - $stud_sold))
+            sused=${sused#-}
+        else
+            sused=0
+        fi
+
+        if [ $LPATCH -ne 0 ]; then
+            if [ -f "$ARHIVE"/"$1.patch" ]; then
+                cp "$ARHIVE"/"$1.patch" "$ZADATAKDIR"/
+                cd "$ZADATAKDIR"/
+                out=$(patch -p1 -i "$1.patch" 2>&1)
+                OUT=$?
+                cd ..
+                rm "$ZADATAKDIR"/"$1.patch"
+                if [ $OUT -ne 0 ]; then
+                    colecho "[r]Something is wrong with patch:[n]\n$out"
+                    exit 1
+                fi
+                touch "$ZADATAKDIR"/student-patch
+                colecho "[g]Files patched, showing differences..."
+
+                # prikaži sve izmene
+                cd "$ZADATAKDIR"
+                for i in *.S; do
+                    diff -w -B "$i" ../"$ZADATAKUNM"/"$i" 1>/dev/null 2>/dev/null
+                    if [ $? -ne 0 ]; then
+                        $DIFF "$i" ../"$ZADATAKUNM"/"$i" &
+                    fi
+                done
+                cd ..
+                exit 0
+            else
+                colecho "[r]Patch file $ARHIVE/$1.patch not found!"
+                exit 1
+            fi
+        fi
+    else
+        # proveri da li ima nešto raspakovano
+        if ! [ -f $ZADATAKDIR/student-sNN ]; then
+            colecho "[r]Unpack an archive first..."
+            exit 1
+        fi
+        # odredi podatke za studenta iz zapamćenih vrednosti
+        stud=$(cat "$ZADATAKDIR"/student-sNN)
+        eval set -- "$stud"
+        sindex=$(cat "$ZADATAKDIR"/student-index)
+        sname=$(cat "$ZADATAKDIR"/student-name)
+        if [ "$sindex" == "$sname" ]; then sname=""; fi
+        sused=0
+        if [ -f "$ZADATAKDIR"/student-patch ]; then LPATCH=1; fi
+        GRUPA=$(cat "$ZADATAKDIR"/student-grupa)
+        RESENJE=$RESENJEF
+        ZADATAK=$ZADATAKF
+        GLAVNI=$GLAVNIF
+        if [ -f "$RESENJE2F" ]; then GRUPATXT=", Grupa $GRUPA"; fi
+        if [ "$GRUPA" == "a" ]; then GRUPA=""; fi
+        if [ "$GRUPA" == "b" ]; then
+            RESENJE=$RESENJE2F
+            GLAVNI=$GLAVNI2F
+        fi
+    fi
+
+    # kreiranje patch-a
+    if [ $SPATCH -ne 0 ]; then
+        if [ ! -f "$ZADATAKDIR"/student-sNN ]; then
+            colecho "[r]Unpack an archive first..."
+            exit 1
+        fi
+        diff -c $ZADATAKUNM $ZADATAKDIR > $ARHIVE/"$1.patch"
+        colecho "[g]Created patch file: $ARHIVE/$1.patch"
+        exit 0
+    fi
+
+    colecho "\n\n\n\n\n\n\n\n"
+    colecho "[g]XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    colecho -c 60 "[g]START $1$GRUPATXT"
+    if [ $LPATCH -ne 0 ]; then
+        colecho -c 60 "[m]patched version"
+    else
+        # da li je postojao patch koji nije primenjen?
+        if [ $LPATCH -eq 0 ] && [ -f "$ARHIVE/$1.patch" ]; then
+            colecho -c 60 "[m]unapplied patch exists"
+        fi
+    fi
+    if [ "$sname" == "" ]; then
+        colecho -c 60 "[b]$sindex"
+    else
+        colecho -c 60 "[b]$sname - $sindex"
+    fi
+    colecho "[g]XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n"
+
+    #nalaženje fajlova od kojih se sastoje zadatak i resenje
+    zfiles=$(grep -E "^[[:space:]]*#[[:space:]]*fajlovi[[:space:]]*:" $ZADATAKDIR/$ZADATAK)
+    if [ "$zfiles" != "" ]; then
+        zfiles=${zfiles#*:}
+    else
+        zfiles="$ZADATAK"
+    fi
+    tzfiles=($zfiles)
+    zfiles=""
+    for f in ${tzfiles[@]}; do
+        if [ "$f" != "$ZADATAK" ]; then
+            zfiles="$zfiles $ZADATAKDIR/$f"
+        fi
+    done
+    rfiles=$(grep -E "^[[:space:]]*#[[:space:]]*fajlovi" $RESENJE)
+    if [ "$rfiles" != "" ]; then
+        rfiles=${rfiles#*:}
+    else
+        rfiles="$RESENJE"
+    fi
+    trfiles=($rfiles)
+    rfiles=""
+    for f in ${trfiles[@]}; do
+        if [ "$f" != "$RESENJE" ]; then
+            rfiles="$rfiles $f"
+        fi
+    done
+    echo "Student files: $ZADATAK $zfiles"
+
+    # proveri da li ima sistemskih poziva ili promenljivih u potprogramu
+    FUNCWARNINGS=""
+    if [ $TYPE -eq 2 ]; then
+        ints=$(grep -c -E "int[[:space:]]+(([$]0x80)|([$]128))" $ZADATAKDIR/$ZADATAK)
+        if [ $ints -ne 0 ]; then
+            warn="\n[r]Attention: student's solution contains system calls"
+            colecho "$warn"
+            FUNCWARNINGS="${FUNCWARNINGS}$warn"
+            WARNING=1
+        fi
+        vars=$(grep -c -E "(([.]long)|([.]word)|([.]byte)|([.]ascii)|([.]quad))" $ZADATAKDIR/$ZADATAK)
+        if [ $vars -ne 0 ]; then
+            warn="\n[r]Attention: student's solution contains variables"
+            colecho "$warn"
+            FUNCWARNINGS="${FUNCWARNINGS}$warn"
+            WARNING=1
+        fi
+    fi
+else    #if [ $GENTEST -eq 0 ];
+    colecho "[g]\n\n\nGenerating testiraj.sh ..."
+    if [ "$GRUPA" == "" ]; then GRUPA="a"; fi
+    if [ "$FORCEGROUP" != "" ]; then GRUPA=$FORCEGROUP; fi
+    RESENJE=$RESENJEF
+    ZADATAK=$ZADATAKF
+    GLAVNI=$GLAVNIF
+    if [ -f "$RESENJE2F" ]; then GRUPATXT=", Grupa $GRUPA"; fi
+    if [ "$GRUPA" == "a" ]; then GRUPA=""; fi
+    if [ "$GRUPA" == "b" ]; then
+        RESENJE=$RESENJE2F
+        GLAVNI=$GLAVNI2F
+    fi
+fi
+
+# pokretanje testova
+if [ "$TESTS" == "[]" ]; then
+    TESTS=(t${GRUPA}[0-9][0-9])
+fi
+for test in ${TESTS[@]}; do
+    do_test $test
+done
+
+if [ $GENTEST -eq 0 ]; then
+    if [ $sused -eq 1 ] && [ "$DIFF" != "true" ]; then
+        colecho "\n\n***********************************************************"
+        colecho "[b]Showing differences from previous workplace..."
+        colecho "***********************************************************"
+        $DIFF $ZADATAKOLD/$ZADATAK $ZADATAKDIR/$ZADATAK &
+    fi
+    $EDITOR $ZADATAKDIR/$ZADATAK &
+
+    colecho "[g]\n***********************************************************"
+    colecho -c 60 "[c]Cumulative results of automatic tests, workplace $1$GRUPATXT"
+    if [ "$sname" == "" ]; then
+        colecho -c 60 "[b]$sindex"
+    else
+        colecho -c 60 "[b]$sname - $sindex"
+    fi
+    if [ $LPATCH -ne 0 ]; then
+        colecho -c 60 "[m]patched version"
+    else
+        # da li je postojao patch koji nije primenjen?
+        if [ $LPATCH -eq 0 ] && [ -f "$ARHIVE/$1.patch" ]; then
+            colecho -c 60 "[m]unapplied patch exists"
+        fi
+    fi
+    colecho "[g]***********************************************************\n"
+    if [ $WARNING -ne 0 ]; then
+        colecho "[r]There were warnings during compilation!"
+        colecho "$FUNCWARNINGS\n"
+    fi
+    if [ $TESTOK -gt 0 ]; then
+        PERCENT=$((TESTOK * 100 / TESTCNT))
+        if [ $TESTOK -eq $TESTCNT ]; then
+            colecho "Successfull automatic tests:   [g]$TESTOK[n] / [g]$TESTCNT[n] - [g]$PERCENT%"
+        else
+            colecho "Successfull automatic tests:   [b]$TESTOK[n] / [g]$TESTCNT[n] - [b]$PERCENT%"
+        fi
+    fi
+    if [ $TESTBAD -gt 0 ]; then
+        PERCENT=$((TESTBAD * 100 / TESTCNT))
+        colecho "Unsuccessfull automatic tests: [r]$TESTBAD[n] / [g]$TESTCNT[n] - [r]$PERCENT%"
+    fi
+    if [ $TERMINATED -gt 0 ]; then
+        PERCENT=$((TERMINATED * 100 / TESTCNT))
+        colecho "Terminated automatic tests:    [r]$TERMINATED[n] / [g]$TESTCNT[n] - [r]$PERCENT%"
+    fi
+else    #if [ $GENTEST -eq 0 ];
+    # generisanje skripta za automatizovano pregledanje
+    sed "s/##TESTS##/$tempnums/" template.sh > testiraj.sh
+    sed -i "s/##EXITS##/$tempexit/" testiraj.sh
+    TESTS=$( IFS=$'\n'; echo "${template[*]}" )
+    TESTS="${TESTS//\\/\\\\}"
+    TESTS="${TESTS//\//\\/}"
+    TESTS="${TESTS//&/\\&}"
+    TESTS="${TESTS//$'\n'/\\n}"
+    sed -i "s/##INOUT##/$TESTS/" testiraj.sh
+    chmod +x testiraj.sh
+    colecho "File [g]testiraj.sh[n] is generated. Try to run it with:"
+    colecho "    [b]./testiraj.sh $RESENJE[n]"
+fi
+
+clear_temp_files
+colecho "\n\n\n"
+exit 0
