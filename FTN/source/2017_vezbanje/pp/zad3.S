@@ -59,7 +59,7 @@ to_inter10:#void to_inter10(char * str);
 		cmpb $'9', (%esi)
 		ja err
 		movb (%esi), %bl
-		subl $'0', %bl
+		subb $'0', %bl
 		mull %ecx
 		andl %edx, %edx
 		jz lower_inter
